@@ -214,6 +214,15 @@
 #include <vector>
 #include <intrin.h>
 
+#include<GraphBuilder.cuh>
+bool first = true;
+GraphBuilder *dpa = new GraphBuilder();
+CellGraphBudffer_t *cgBuffer=NULL;
+Image *result=NULL;
+WORD red_mask = 0xF800;//5
+WORD green_mask = 0x7E0;//6
+WORD blue_mask = 0x1F;//5
+
 // Private Prototypes, should not be called directly
 void RenderPlain (SSurface Src, SSurface Dst, RECT *);
 void RenderForced1X (SSurface Src, SSurface Dst, RECT *);
@@ -786,11 +795,12 @@ void RenderMergeHires(void *src, int srcPitch , void* dst, int dstPitch, unsigne
 // No enlargement, just render to the screen
 void RenderPlain (SSurface Src, SSurface Dst, RECT *rect)
 {
+	
 	SetRect(rect, Src.Width, Src.Height, 1);
 	if(Src.Height > SNES_HEIGHT_EXTENDED)
 		rect->bottom -= (GUI.HeightExtend?0:15);
 	const uint32 srcHeight = (rect->bottom - rect->top);
-
+	const uint32 srcWidth = (rect->right - rect->left);
 	uint16 *lpSrc = reinterpret_cast<uint16 *>(Src.Surface);
 	const unsigned int srcPitch = Src.Pitch >> 1;
 
@@ -798,9 +808,40 @@ void RenderPlain (SSurface Src, SSurface Dst, RECT *rect)
 	{
 		const unsigned int dstPitch = Dst.Pitch >> 1;
 		uint16 *lpDst = reinterpret_cast<uint16 *>(Dst.Surface) + rect->top * dstPitch + rect->left;
-
+		cv::Mat tes = cv::Mat(cv::Size(Src.Width, Src.Height), CV_8UC3);
 		for (unsigned int H = 0; H != srcHeight; H++, lpDst += dstPitch, lpSrc += srcPitch)
-			memcpy (lpDst, lpSrc, Src.Width << 1);
+		{
+			memcpy(lpDst, lpSrc, Src.Width << 1);
+			for (unsigned int W = 0; W != srcWidth; ++W){
+				UINT16 a = lpSrc[W];
+
+				BYTE red_value = (a & red_mask) >> 8;
+				BYTE green_value = (a & green_mask) >> 3;
+				BYTE blue_value = (a & blue_mask)<<3;
+				tes.at<cv::Vec3b>(H, W) = cv::Vec3b(blue_value, green_value, red_value);
+			}
+		}
+		Image *tex = new Image(tes);
+	
+		if (first){
+			cgBuffer = GenCGBuffer(tex->GetSize().width, tex->GetSize().height);
+			result = new Image(cv::Size(Src.Width * 3, Src.Height * 3));
+			result->Malloc((Src.Width * 3* Src.Height * 3)*CHANNEL*sizeof(uchar));
+			first = false;
+		}
+		Image* simGraph = dpa->Bulid_DisSimilarGraph(tex);
+		dpa->BulidCellGraph(cgBuffer,tex, simGraph);
+		dpa->OptimizeCurve(cgBuffer, tex->GetSize());
+		dpa->Rasterizer(cgBuffer, simGraph, tex, result);
+		result->toHost();
+		result->Show(false, 1);
+		delete tex;
+		delete simGraph;
+		//tes.release();
+		//delete result;
+		//system("pause");
+			
+		//exit(0);
 	}
 	else if(GUI.ScreenDepth == 32)
 	{
